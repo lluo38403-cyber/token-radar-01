@@ -129,7 +129,8 @@
       { text: weeklyFor(p, capital, chain), cost: 'about $2 of gas a week', time: '10 minutes a week' },
       { text: 'Hold the position for at least ' + hold + ' days so the activity is counted in more than one snapshot.', cost: 'the $' + capital + ' stays in the position', time: hold + ' days' },
       { text: "Before you withdraw, open the protocol's own points or rewards page and claim only from the link it publishes.", cost: 'no fee to check, and never pay to claim', time: '10 minutes' },
-      { text: 'Write the wallet, the dates and every transaction in a farm log so you can repeat the position or unwind it.', cost: 'nothing but the log', time: '5 minutes' }
+      { text: 'Write the wallet, the dates and every transaction in a farm log so you can repeat the position or unwind it.', cost: 'nothing but the log', time: '5 minutes' },
+      { text: 'Check the snapshot date (' + DATA.as_of + ') and confirm ' + p.name + ' still records no token before you farm: a launch after that date ends the farm, so a stale snapshot means starting over.', cost: 'nothing but the check', time: '5 minutes' }
     ].map(stepText);
   }
 
@@ -236,6 +237,72 @@
         el('p', { text: s.category_count + ' categories share ' + fmtUsd(s.total_implied_usd) + ' of total implied value. The six largest categories:' })
       ),
       el('div', { class: 'facts' }, chips)
+    );
+  }
+
+  function moversStrip() {
+    var movers = DATA.movers;
+    if (!movers || movers.length === 0) return null;
+    var g = DATA.growth;
+    var spread = g ? el('p', { class: 'sub', text: g.positive_rows + ' of ' + DATA.board_size + ' rows grew in 7 days, ' + g.flat_or_negative_rows + ' were flat or down, ' + g.no_data_rows + ' report no figure. Fastest rise ' + fmtPct(g.max_growth_pct) + ', median ' + fmtPct(g.median_growth_pct) + '.' }) : null;
+    var cards = movers.map(function (r) {
+      var growth = r.change_7d === null ? 'n/a' : fmtPct(r.change_7d);
+      var growthClass = r.change_7d === null ? '' : r.change_7d >= 0 ? 'pos' : 'neg';
+      return el('div', {
+        class: 'mover-card',
+        tabindex: '0',
+        role: 'button',
+        'aria-label': 'Open details for ' + r.name,
+        onclick: function () { openDetail(r.slug); },
+        onkeydown: function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(r.slug); } }
+      },
+        el('span', { class: 'place', text: 'Rank ' + r.rank }),
+        el('b', { text: r.name }),
+        el('span', { class: 'val num ' + growthClass, text: growth + ' in 7d' }),
+        el('span', { class: 'sub', text: 'Implied value ' + fmtUsd(r.implied_value_usd) + ' · ' + (r.category || 'Other') })
+      );
+    });
+    return el('section', { class: 'movers', 'aria-label': 'Biggest 7-day movers' },
+      el('h2', { text: 'Biggest 7-day movers' }),
+      el('p', { class: 'sub', text: 'The five pre-token rows whose TVL grew fastest in the last seven days. Growth alone does not make a launch: each mover is still ranked by implied value above. Select a card for its model and farm plan.' }),
+      spread,
+      el('div', { class: 'movers-grid' }, cards)
+    );
+  }
+
+  function chainTable() {
+    var rows = DATA.chainSummary;
+    if (!rows || rows.length === 0) return null;
+    var tbody = el('tbody');
+    rows.forEach(function (c) {
+      tbody.appendChild(el('tr', null,
+        el('td', null, el('b', { text: c.chain })),
+        el('td', { class: 'num', text: String(c.rows) }),
+        el('td', { class: 'num', text: fmtUsd(c.total_implied_usd) })
+      ));
+    });
+    // Totals count a multi-chain protocol once per chain, as the rows do:
+    // the footer says so, so nobody reads it as the board's total.
+    var totalRows = rows.reduce(function (a, c) { return a + c.rows; }, 0);
+    var totalImplied = rows.reduce(function (a, c) { return a + c.total_implied_usd; }, 0);
+    var tfoot = el('tfoot', null, el('tr', null,
+      el('td', null, el('b', { text: 'All chains (counted per chain)' })),
+      el('td', { class: 'num', text: String(totalRows) }),
+      el('td', { class: 'num', text: fmtUsd(totalImplied) })
+    ));
+    return el('section', { class: 'panel chain-panel', 'aria-label': 'Implied value by chain' },
+      el('div', { class: 'table-wrap' },
+        el('table', null,
+          el('caption', { class: 'sub', text: 'Implied value by chain. A protocol live on several chains counts under each of them, so the rows add up to more than the board.' }),
+          el('thead', null, el('tr', null,
+            el('th', { scope: 'col', text: 'Chain' }),
+            el('th', { scope: 'col', text: 'Rows' }),
+            el('th', { scope: 'col', text: 'Total implied value' })
+          )),
+          tbody,
+          tfoot
+        )
+      )
     );
   }
 
@@ -449,6 +516,8 @@
     shell.appendChild(lede());
     shell.appendChild(top3());
     shell.appendChild(summaryStrip());
+    shell.appendChild(moversStrip());
+    shell.appendChild(chainTable());
     shell.appendChild(controls());
     shell.appendChild(state.tab === 'pre-token' ? boardTable() : liveTable());
     if (state.tab === 'pre-token') shell.appendChild(modelPanel());

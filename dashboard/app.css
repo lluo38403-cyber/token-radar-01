@@ -52,6 +52,24 @@ button { cursor: pointer; }
 .top3-card b { font-size: 19px; line-height: 1.2; }
 .top3-card .val { font-family: var(--font-num); font-size: 22px; color: #ffffff; }
 .top3-card .sub { color: #b9cfc9; font-size: 12px; }
+.movers { margin-bottom: var(--s5); }
+.movers h2 { margin-bottom: var(--s1); }
+.movers > p { color: var(--muted); max-width: 72ch; margin-bottom: var(--s3); }
+.movers-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--s3); }
+.mover-card { background: var(--navy); color: #eaf2f0; border-radius: var(--r-panel); padding: var(--s3) var(--s4); display: grid; gap: var(--s1); }
+.mover-card { cursor: pointer; border: 2px solid transparent; }
+.mover-card:hover { background: var(--navy-deep); border-color: #2ec4a8; }
+.mover-card:focus-visible { outline: 2px solid #2ec4a8; outline-offset: 2px; }
+.mover-card .place { font-family: var(--font-num); font-size: 12px; letter-spacing: 0.06em; color: #2ec4a8; text-transform: uppercase; }
+.mover-card b { font-size: 15px; line-height: 1.2; }
+.mover-card .val { font-family: var(--font-num); font-size: 17px; color: #ffffff; }
+.mover-card .val.neg { color: #f0a49b; }
+.mover-card .sub { color: #b9cfc9; font-size: 12px; }
+.chain-panel { margin-bottom: var(--s5); }
+.chain-panel caption { padding: var(--s3) var(--s4) 0; text-align: left; }
+@media (max-width: 900px) {
+  .movers-grid { grid-template-columns: 1fr 1fr; }
+}
 .controls { display: flex; flex-wrap: wrap; align-items: end; gap: var(--s3); padding: var(--s4) 0; border-top: 1px solid var(--border); }
 .field { display: grid; gap: var(--s1); }
 .field label { color: var(--muted); font-size: 12px; }

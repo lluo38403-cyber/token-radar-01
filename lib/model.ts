@@ -163,6 +163,13 @@ export interface BoardSummary {
   categories: { name: string; rows: number; total_implied_usd: number }[];
 }
 
+/** One chain's share of the board: how many rows run on it and what they are worth together. */
+export interface ChainSummaryRow {
+  chain: string;
+  rows: number;
+  total_implied_usd: number;
+}
+
 /** Everything the dashboard needs: the board, the live set, and the model it runs. */
 export interface RadarData {
   as_of: string;
@@ -175,6 +182,9 @@ export interface RadarData {
   early_size: number;
   live_size: number;
   summary: BoardSummary;
+  movers: RadarRow[];
+  growth: GrowthSummary;
+  chainSummary: ChainSummaryRow[];
   rows: RadarRow[];
   live: LiveRow[];
 }
@@ -303,7 +313,7 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
       chain_count: s.p.chains.length,
       age_days: s.age,
     },
-    farm_steps: farmSteps(s.p, s.age).map(stepText),
+    farm_steps: farmSteps(s.p, s.age, snapshot.as_of).map(stepText),
   }));
 }
 
@@ -376,17 +386,19 @@ function weeklyFor(p: SnapshotProtocol, capital: number, chain: string): string 
 }
 
 /**
- * A protocol's farm plan: six steps, each an action with a cost and a time.
+ * A protocol's farm plan: seven steps, each an action with a cost and a time.
  * The plan is derived from the protocol's own record (category, chains,
  * TVL, age), never from a hand-written list of names. Step 2 opens the
- * position; step 3 is the weekly action for the protocol's own category.
+ * position; step 3 is the weekly action for the protocol's own category;
+ * step 7 checks the snapshot is still current before any money moves.
  */
-export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
+export function farmSteps(p: SnapshotProtocol, age: number | null, asOf?: string): FarmStep[] {
   const chain = chainOf(p);
   const capital = capitalFor(p);
   const hold = holdDaysFor(age);
   const action = actionFor(p, capital, chain);
   const weekly = weeklyFor(p, capital, chain);
+  const asOfText = asOf ?? 'the snapshot date';
   return [
     {
       text: `Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline.`,
@@ -416,6 +428,11 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
     {
       text: `Write the wallet, the dates and every transaction in a farm log so you can repeat the position or unwind it.`,
       cost: 'nothing but the log',
+      time: '5 minutes',
+    },
+    {
+      text: `Check the snapshot date (${asOfText}) and confirm ${p.name} still records no token before you farm: a launch after that date ends the farm, so a stale snapshot means starting over.`,
+      cost: 'nothing but the check',
       time: '5 minutes',
     },
   ];
@@ -488,6 +505,61 @@ export function boardSummary(board: BoardRow[]): BoardSummary {
   };
 }
 
+/** The board's seven-day growth spread: its fastest rise, its middle value, and how many rows rose, fell or report no figure. */
+export interface GrowthSummary {
+  max_growth_pct: number | null;
+  median_growth_pct: number | null;
+  positive_rows: number;
+  flat_or_negative_rows: number;
+  no_data_rows: number;
+}
+
+/** The growth spread, from the rows alone: a null figure counts as no data, never as zero growth. */
+export function growthSummary(board: BoardRow[]): GrowthSummary {
+  const growths = board.map((r) => r.change_7d).filter((g): g is number => g !== null);
+  const sorted = [...growths].sort((a, b) => a - b);
+  const median =
+    sorted.length === 0
+      ? null
+      : sorted.length % 2 === 1
+        ? sorted[(sorted.length - 1) / 2]!
+        : Math.round(((sorted[sorted.length / 2 - 1]! + sorted[sorted.length / 2]!) / 2) * 100) / 100;
+  return {
+    max_growth_pct: sorted.length > 0 ? sorted[sorted.length - 1]! : null,
+    median_growth_pct: median,
+    positive_rows: growths.filter((g) => g > 0).length,
+    flat_or_negative_rows: growths.filter((g) => g <= 0).length,
+    no_data_rows: board.length - growths.length,
+  };
+}
+
+/** The five board rows with the largest seven-day growth, ties broken by implied value. */
+export function topMovers(board: BoardRow[]): BoardRow[] {
+  const growthOf = (r: BoardRow): number => (r.change_7d === null ? Number.NEGATIVE_INFINITY : r.change_7d);
+  return [...board]
+    .sort((a, b) => growthOf(b) - growthOf(a) || b.implied_value_usd - a.implied_value_usd || (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0))
+    .slice(0, 5);
+}
+
+/** One chain's share of the board: how many rows run on it and what they are worth together. */
+export function chainSummary(board: BoardRow[]): ChainSummaryRow[] {
+  const byChain = new Map<string, { rows: number; total_implied_usd: number }>();
+  for (const r of board) {
+    // A protocol live on several chains counts under each of them: the
+    // table answers "what runs on this chain", not "what runs only here".
+    const chains = r.chains.length > 0 ? r.chains : ['Unchained'];
+    for (const chain of chains) {
+      const slot = byChain.get(chain) ?? { rows: 0, total_implied_usd: 0 };
+      slot.rows += 1;
+      slot.total_implied_usd += r.implied_value_usd;
+      byChain.set(chain, slot);
+    }
+  }
+  return [...byChain.entries()]
+    .map(([chain, s]) => ({ chain, rows: s.rows, total_implied_usd: s.total_implied_usd }))
+    .sort((a, b) => b.total_implied_usd - a.total_implied_usd || b.rows - a.rows || (a.chain < b.chain ? -1 : a.chain > b.chain ? 1 : 0));
+}
+
 /** Everything the dashboard renders, from the snapshot. */
 export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): { board: BoardRow[]; radar: RadarData } {
   const board = buildBoard(snapshot, model);
@@ -504,6 +576,9 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     early_size: early,
     live_size: live.length,
     summary: boardSummary(board),
+    movers: topMovers(board).map(radarRow),
+    growth: growthSummary(board),
+    chainSummary: chainSummary(board),
     rows: board.map(radarRow),
     live,
   };
