@@ -154,6 +154,15 @@ export interface LiveRow {
   change_7d: number | null;
 }
 
+/** The board's summary: its spread across categories, its top and median implied values, and its total. */
+export interface BoardSummary {
+  top_implied_usd: number;
+  median_implied_usd: number;
+  total_implied_usd: number;
+  category_count: number;
+  categories: { name: string; rows: number; total_implied_usd: number }[];
+}
+
 /** Everything the dashboard needs: the board, the live set, and the model it runs. */
 export interface RadarData {
   as_of: string;
@@ -165,6 +174,7 @@ export interface RadarData {
   board_size: number;
   early_size: number;
   live_size: number;
+  summary: BoardSummary;
   rows: RadarRow[];
   live: LiveRow[];
 }
@@ -249,10 +259,12 @@ function bySlug(protocols: SnapshotProtocol[]): Map<string, SnapshotProtocol> {
 export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): BoardRow[] {
   const index = bySlug(snapshot.protocols);
   const chosen = new Map<string, SnapshotProtocol>();
-  // The watchlist is the floor: every slug it names.
+  // The watchlist is the floor: every slug it names. A slug the snapshot
+  // does not carry is a broken input, not a row to skip in silence: name it.
   for (const slug of snapshot.watchlist) {
     const p = index.get(slug);
-    if (p !== undefined) chosen.set(slug, p);
+    if (p === undefined) throw new SnapshotError(`snapshot.json's watchlist names ${slug}, which no protocol carries`);
+    chosen.set(slug, p);
   }
   // The early radar: genuine launch candidates below the watchlist floor,
   // by TVL, up to the cap. The pool holds 138, so all of them are taken.
@@ -446,6 +458,36 @@ export function radarRow(row: BoardRow): RadarRow {
   };
 }
 
+/** The board's summary, from the rows alone: top and median implied values, the total, and the per-category split. */
+export function boardSummary(board: BoardRow[]): BoardSummary {
+  const values = board.map((r) => r.implied_value_usd).sort((a, b) => a - b);
+  const total = values.reduce((a, b) => a + b, 0);
+  const median =
+    values.length === 0
+      ? 0
+      : values.length % 2 === 1
+        ? values[(values.length - 1) / 2]!
+        : Math.round((values[values.length / 2 - 1]! + values[values.length / 2]!) / 2);
+  const byCategory = new Map<string, { rows: number; total_implied_usd: number }>();
+  for (const r of board) {
+    const name = r.category ?? 'Other';
+    const slot = byCategory.get(name) ?? { rows: 0, total_implied_usd: 0 };
+    slot.rows += 1;
+    slot.total_implied_usd += r.implied_value_usd;
+    byCategory.set(name, slot);
+  }
+  const categories = [...byCategory.entries()]
+    .map(([name, s]) => ({ name, rows: s.rows, total_implied_usd: s.total_implied_usd }))
+    .sort((a, b) => b.total_implied_usd - a.total_implied_usd || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return {
+    top_implied_usd: values.length > 0 ? values[values.length - 1]! : 0,
+    median_implied_usd: median,
+    total_implied_usd: total,
+    category_count: categories.length,
+    categories,
+  };
+}
+
 /** Everything the dashboard renders, from the snapshot. */
 export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): { board: BoardRow[]; radar: RadarData } {
   const board = buildBoard(snapshot, model);
@@ -461,6 +503,7 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     board_size: board.length,
     early_size: early,
     live_size: live.length,
+    summary: boardSummary(board),
     rows: board.map(radarRow),
     live,
   };

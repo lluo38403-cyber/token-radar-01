@@ -54,6 +54,26 @@ mkdirSync(outDir, { recursive: true });
 writeFileSync(join(outDir, 'board.json'), `${JSON.stringify({ rows: board })}\n`);
 writeFileSync(join(outDir, 'data.js'), dataScript(radar));
 
+// Read the dashboard data back and prove it parses: a corrupt data.js
+// would ship a blank page, so refuse it here and name the file.
+const dataText = readFileSync(join(outDir, 'data.js'), 'utf8');
+if (!dataText.startsWith('window.RADAR=') || !dataText.trimEnd().endsWith(';')) {
+  process.stderr.write(`token radar: ${join(outDir, 'data.js')} does not start with window.RADAR= or end with ';': the dashboard data was not written\n`);
+  process.exit(1);
+}
+try {
+  const body = dataText.slice('window.RADAR='.length).trimEnd();
+  const jsonText = body.endsWith(';') ? body.slice(0, -1) : body;
+  const parsed = JSON.parse(jsonText);
+  if (!parsed || !Array.isArray(parsed.rows) || parsed.rows.length !== board.length) {
+    process.stderr.write(`token radar: ${join(outDir, 'data.js')} holds ${Array.isArray(parsed?.rows) ? parsed.rows.length : 'no'} rows, the board has ${board.length}: the dashboard data does not match the board\n`);
+    process.exit(1);
+  }
+} catch (e) {
+  process.stderr.write(`token radar: ${join(outDir, 'data.js')} does not parse as JSON: ${(e as Error).message}\n`);
+  process.exit(1);
+}
+
 /** Copy one directory's regular files into `to`, skipping dot-names, and report what landed. */
 function copyDir(from: string, to: string): string[] {
   if (!existsSync(from)) return [];
@@ -80,6 +100,15 @@ for (const name of shots) {
     process.stderr.write(`token radar: screenshots/${name}: a name is letters, digits and . _ -, 1 to 128 characters\n`);
     process.exit(1);
   }
+  const size = statSync(join(here, 'screenshots', name)).size;
+  if (size === 0) {
+    process.stderr.write(`token radar: screenshots/${name} is empty: hand in a real render, not a zero-byte file\n`);
+    process.exit(1);
+  }
+  if (size > SHOT_MAX_BYTES) {
+    process.stderr.write(`token radar: screenshots/${name} is ${size} bytes, over the ${SHOT_MAX_BYTES} byte cap: shrink the render\n`);
+    process.exit(1);
+  }
 }
 
 // The dossier is written last: the scorer rebuilds it from this /output and compares bytes.
@@ -90,5 +119,6 @@ writeFileSync(
 
 process.stdout.write(
   `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored (${radar.early_size} early, ${radar.live_size} live set aside)\n` +
+    `token radar: top implied value $${radar.summary.top_implied_usd}, median $${radar.summary.median_implied_usd}, ${radar.summary.category_count} categories, $${radar.summary.total_implied_usd} total implied value\n` +
     `token radar: wrote ${join(outDir, 'board.json')}, ${join(outDir, 'data.js')}, ${join(outDir, 'dashboard')} (${dashFiles.length} files), ${join(outDir, 'screenshots')} (${shots.length} images) and ${join(outDir, 'dossier.json')}\n`,
 );

@@ -220,11 +220,33 @@
     return el('section', { class: 'top3', 'aria-label': 'Top 3 by implied value' }, cards);
   }
 
+  function summaryStrip() {
+    var s = DATA.summary;
+    if (!s) return null;
+    var top = s.categories.slice(0, 6);
+    var chips = top.map(function (c) {
+      return el('div', { class: 'fact' },
+        el('span', { text: c.name }),
+        el('b', { text: c.rows + ' rows · ' + fmtUsd(c.total_implied_usd) })
+      );
+    });
+    return el('section', { class: 'lede', 'aria-label': 'Board summary' },
+      el('div', null,
+        el('h2', { text: 'Top implied value ' + fmtUsd(s.top_implied_usd) + ', median ' + fmtUsd(s.median_implied_usd) }),
+        el('p', { text: s.category_count + ' categories share ' + fmtUsd(s.total_implied_usd) + ' of total implied value. The six largest categories:' })
+      ),
+      el('div', { class: 'facts' }, chips)
+    );
+  }
+
   function controls() {
     var categories = Array.from(new Set(DATA.rows.map(function (r) { return r.category || 'Other'; }))).sort();
     var chains = Array.from(new Set(DATA.rows.reduce(function (acc, r) { return acc.concat(r.chains || []); }, []))).sort();
+    var chainCounts = {};
+    DATA.rows.forEach(function (r) { (r.chains || []).forEach(function (c) { chainCounts[c] = (chainCounts[c] || 0) + 1; }); });
     var search = el('input', { type: 'search', id: 'q', placeholder: 'Search name, category or chain', value: state.q, 'aria-label': 'Search the board' });
     search.addEventListener('input', function () { state.q = search.value; writeHash(); render(); });
+    var csv = el('button', { type: 'button', text: 'Download CSV', onclick: function () { downloadCsv(); } });
     var select = el('select', { id: 'category', 'aria-label': 'Filter by category' },
       el('option', { value: 'all', text: 'All categories' }),
       categories.map(function (c) { return el('option', { value: c, text: c, selected: c === state.category ? 'selected' : null }); })
@@ -232,7 +254,7 @@
     select.addEventListener('change', function () { state.category = select.value; writeHash(); render(); });
     var chainSelect = el('select', { id: 'chain', 'aria-label': 'Filter by chain' },
       el('option', { value: 'all', text: 'All chains' }),
-      chains.map(function (c) { return el('option', { value: c, text: c, selected: c === state.chain ? 'selected' : null }); })
+      chains.map(function (c) { return el('option', { value: c, text: c + ' (' + (chainCounts[c] || 0) + ')', selected: c === state.chain ? 'selected' : null }); })
     );
     chainSelect.addEventListener('change', function () { state.chain = chainSelect.value; writeHash(); render(); });
     var pre = el('button', { type: 'button', 'aria-pressed': state.tab === 'pre-token' ? 'true' : 'false', text: 'Pre-token', onclick: function () { state.tab = 'pre-token'; render(); } });
@@ -242,8 +264,32 @@
       el('div', { class: 'field' }, el('label', { for: 'category', text: 'Category' }), select),
       el('div', { class: 'field' }, el('label', { for: 'chain', text: 'Chain' }), chainSelect),
       el('div', { class: 'field' }, el('span', { class: 'sub', text: 'Token status' }), el('div', { class: 'tabs' }, pre, live)),
+      el('div', { class: 'field' }, el('span', { class: 'sub', text: 'Export' }), csv),
       el('span', { class: 'count', text: state.tab === 'pre-token' ? rows().length + ' rows shown' : DATA.live.length + ' live-token protocols' })
     );
+  }
+
+  // The board as a CSV, built in the page from the data it already holds:
+  // rank, name, category, chains, TVL, seven-day growth, age and implied
+  // value, for the rows the current filters show, strongest first.
+  function downloadCsv() {
+    var list = state.tab === 'pre-token' ? sortedRows(rows()) : DATA.live;
+    var head = 'rank,name,category,chains,tvl_usd,change_7d,age_days,implied_value_usd';
+    function cell(v) {
+      var s = v === null || v === undefined ? '' : String(v);
+      return s.indexOf(',') >= 0 || s.indexOf('"') >= 0 ? '"' + s.replace(/"/g, '""') + '"' : s;
+    }
+    var lines = list.map(function (r) {
+      return [r.rank === undefined ? 'live' : r.rank, r.name, r.category || 'Other', (r.chains || []).join(';'), r.tvl_usd, r.change_7d, r.age_days, r.implied_value_usd === undefined ? '' : r.implied_value_usd].map(cell).join(',');
+    });
+    var blob = new Blob([[head].concat(lines).join('\n')], { type: 'text/csv' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'token-radar-board.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
   }
 
   function sortHeader(key, label) {
@@ -402,6 +448,7 @@
     shell.appendChild(header());
     shell.appendChild(lede());
     shell.appendChild(top3());
+    shell.appendChild(summaryStrip());
     shell.appendChild(controls());
     shell.appendChild(state.tab === 'pre-token' ? boardTable() : liveTable());
     if (state.tab === 'pre-token') shell.appendChild(modelPanel());
